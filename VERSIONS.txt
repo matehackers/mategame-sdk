@@ -1,0 +1,10 @@
+Version Changelogs
+==========
+
+0.1
+---
+
+- Initial version of SDK
+- Makefile for x86 and Arduino
+- Initial docs
+- Space Invaders, hardware freedom day style
