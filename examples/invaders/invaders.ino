@@ -115,7 +115,7 @@ unsigned long soundTime = -1;
 
 // Allow the overall speed of the game to be adjusted.
 // Higher number (like 1.5) slow the game down.  Lower numbers (like 0.6) speed it up.
-float speedAdjust = 0.05;
+float speedAdjust = 1;
 
 /* Prototypes */
 void initVars();
