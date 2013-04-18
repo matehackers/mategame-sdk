@@ -42,3 +42,17 @@ Soon
 ## Hardware Peripherals
 
 Soon
+
+## TODO
+
+### Known Issues
+
+* Framerate and tv.delay need to be reworked
+* Lot's of uninplemented functions
+* More documentation and translate into different languages
+
+### Ideas
+
+* Draw window showing, Arduino input/output ports
+* Port to Processing and integrate into Arduino IDE
+* Integrate joysticks and nunchuck into the simulator
