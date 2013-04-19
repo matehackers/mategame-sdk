@@ -46,6 +46,9 @@ export AVRDUDE_ARD_PROGRAMMER = arduino
 # If your skecth is called 'invaders.ino' it will be 'invaders'
 export TARGET = target_name
 
+# Additional cpp or c files that should be linked together (they should have no 'main' function)
+export ADDITIONAL_TARGETS =
+
 upload:
 	make -f $(MOCKVISION_PATH)/arduino.mk upload
 

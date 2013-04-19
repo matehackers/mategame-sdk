@@ -106,6 +106,6 @@ typedef uint8_t byte;
 #define PSTR(s) (__extension__({static char __c[] PROGMEM = (s); &__c[0];}))
 
 #define pgm_read_word(v) *(v)
-#define pgm_read_byte(v) (v)
+#define pgm_read_byte(v) *(v)
 
 #endif /* __PGMSPACE_H_ */

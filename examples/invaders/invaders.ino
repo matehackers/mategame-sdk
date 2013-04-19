@@ -15,6 +15,10 @@
 #include <EEPROM.h>
 #include <Controllers.h>
 
+#include <fontALL.h>
+
+#include "invaders.h"
+
 #define W 136
 #define H 98
 #define LEFT_BUTTON 3
@@ -56,8 +60,8 @@ const uint16_t PROGMEM bitmaps[] = {
 const char PROGMEM s0[] = "HIGH SCORES";
 const char PROGMEM s1[] = " DA";
 const char PROGMEM s2[] = "HARDWARE FREEDOM";
-const char PROGMEM s3[] = "Matehackers";
-const char PROGMEM s4[] = "Casa da Cultura Digital";
+const char PROGMEM s3[] = "MATEHACKERS";
+const char PROGMEM s4[] = "CASA DA CULTURA DIGITAL";
 const char PROGMEM s5[] = "";
 const char PROGMEM s6[] = "";
 const char PROGMEM s7[] = "Game";
@@ -117,46 +121,6 @@ unsigned long soundTime = -1;
 // Higher number (like 1.5) slow the game down.  Lower numbers (like 0.6) speed it up.
 float speedAdjust = 1;
 
-/* Prototypes */
-void initVars();
-bool titleScreen();
-bool displayHighScores(byte file);
-void drawBunkers();
-void drawBunker(byte x, byte y);
-void drawCannon(byte x, byte y, byte color);
-void drawScoreLine();
-void drawRemainingLives();
-
-void advanceInvaders();
-void drawLaser();
-void drawBitmap(byte x, byte y, unsigned int bitmapIndex);
-void drawInvaders();
-void drawBitmap();
-void dropBomb();
-void drawBombs();
-
-void playTone(unsigned int frequency, unsigned long duration_ms);
-void playTone(unsigned int frequency, unsigned long duration_ms, byte priority);
-
-void handleMysteryShip();
-
-void gameOver();
-void enterInitials();
-void newLevel();
-void tick();
-bool getInput();
-void enterHighScore(byte file);
-
-bool pollFireButton(int n);
-
-void damage(byte x, byte y);
-void destroyCannon();
-
-void spaceInvaders();
-
-bool columnEmpty(byte c);
-bool rowEmpty(byte r);
-
 void initSpaceInvaders(bool start) {
 
   tv.fill(0);
@@ -169,7 +133,7 @@ void initSpaceInvaders(bool start) {
   }
 
   tv.fill(0);
-  tv.select_font(_3X5);
+  tv.select_font(font4x6);
 
   level = 1;
   remainingLives = 2;
@@ -180,7 +144,7 @@ void initSpaceInvaders(bool start) {
   drawCannon(cannonX, CANNON_Y, 1);
   drawScoreLine();
   drawRemainingLives();
-  tv.delay(30);
+  tv.delay_frame(30);
 }
 
 void initVars() {
@@ -225,14 +189,14 @@ void setup() {
   randomSeed(analogRead(0));
 
   playTone(1046, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(1318, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(1568, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(2093, 20);
 
-  tv.delay(10);
+  tv.delay_frame(10);
 
   initSpaceInvaders(false);
 }
@@ -343,14 +307,14 @@ void spaceInvaders() {
 }
 
 void gameOver() {
-  tv.delay(60);
+  tv.delay_frame(60);
   tv.fill(0);
-  tv.select_font(_5X7);
+  tv.select_font(font6x8);
   strcpy_P(s, (char *)pgm_read_word(&(strings[7])));
-  tv.print_str(44, 40, s);
+  tv.print(44, 40, s);
   strcpy_P(s, (char *)pgm_read_word(&(strings[8])));
-  tv.print_str(72, 40, s);
-  tv.delay(180);
+  tv.print(72, 40, s);
+  tv.delay_frame(180);
 
   enterHighScore(0); // Space Invaders high scores are in file 0
 }
@@ -361,9 +325,9 @@ void enterInitials() {
   tv.fill(0);
   strcpy_P(s, (char *)pgm_read_word(&(strings[0])));
   s[10] = '\0'; // hack: truncate the final 'S' off of the string "HIGH SCORES"
-  tv.print_str(16, 0, s);
+  tv.print(16, 0, s);
   sprintf(s, "%d", score);
-  tv.print_str(88, 0, s);
+  tv.print(88, 0, s);
 
   initials[0] = ' ';
   initials[1] = ' ';
@@ -378,7 +342,7 @@ void enterInitials() {
     }
     tv.draw_line(56, 28, 88, 28, 0);
     tv.draw_line(56 + (index*8), 28, 56 + (index*8) + 4, 28, 1);
-    tv.delay(10);
+    tv.delay_frame(10);
     
     if ((Controller.leftPressed())) {
       index--;
@@ -507,12 +471,13 @@ bool displayHighScores(byte file) {
   int address = file*10*5;
   byte hi, lo;
   tv.fill(0);
-  tv.select_font(_5X7);
+  tv.select_font(font6x8);
   strcpy_P(s, (char *)pgm_read_word(&(strings[0])));
-  tv.print_str(40, 0, s);
+  tv.print(40, 0, s);
+
   for(int i=0;i<10;i++) {
     sprintf(s, "%2d", i+1);
-    tv.print_str(x, y+(i*8), s);
+    tv.print(x, y+(i*8), s);
 
     hi = EEPROM.read(address + (5*i));
     lo = EEPROM.read(address + (5*i) + 1);
@@ -527,7 +492,7 @@ bool displayHighScores(byte file) {
 
     if (score > 0) {
       sprintf(s, "%c%c%c %d", initials[0], initials[1], initials[2], score);
-      tv.print_str(x+24, y+(i*8), s);
+      tv.print(x+24, y+(i*8), s);
     }
   }
 
@@ -540,11 +505,11 @@ bool displayHighScores(byte file) {
 void explosionSound()
 {
   playTone(1046, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(1318, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(1568, 20);
-  tv.delay(1);
+  tv.delay_frame(1);
   playTone(2093, 20);
 }
 
@@ -555,7 +520,7 @@ bool writeWithDelay(const char **str, byte x, byte y, byte start, byte end, int 
     if (s[i] == ' ') continue; // don't delay on the space char
     strcpy_P(s, (char *)pgm_read_word(str));
     s[i] = '\0';
-    tv.print_str(x, y, s);
+    tv.print(x, y, s);
     if (pollFireButton(delay)) {
       return true;
     }
@@ -568,8 +533,8 @@ bool titleScreen() {
   int d;
 
   tv.fill(0);
-  tv.delay(2);
-  tv.select_font(_5X7);
+  tv.delay_frame(2);
+  tv.select_font(font6x8);
 
   d = 10;
 
@@ -584,7 +549,7 @@ bool titleScreen() {
     return true;
   }
 
-  tv.select_font(_3X5);
+  tv.select_font(font4x6);
 
   if (writeWithDelay(&strings[3], 56, 55, 1, 12, d))
     return true;
@@ -640,7 +605,7 @@ bool titleScreen() {
       return true;
     }
   }
-  tv.delay(10);
+  tv.delay_frame(10);
 
   for(x=80;x<W+5;x++) {
     drawBitmap(x-6, y+1, BITMAP_BLANK);
@@ -659,7 +624,7 @@ bool titleScreen() {
       return true;
     }
   }
-  tv.delay(20);
+  tv.delay_frame(20);
   
   for(x=W+5;x>79;x--) {
     drawBitmap(x-6, y+1, BITMAP_BLANK);
@@ -679,7 +644,7 @@ bool titleScreen() {
       return true;
     }
   }
-  tv.delay(30);
+  tv.delay_frame(30);
   drawBitmap(80, y, BITMAP_BLANK);
 
   if (pollFireButton(60)) {
@@ -707,16 +672,16 @@ void drawFrame() {
 
 void newLevel() {
   level++;
-  tv.delay(60);
+  tv.delay_frame(60);
   tv.fill(0);
-  tv.select_font(_5X7);
+  tv.select_font(font6x8);
   char s[4];
   sprintf(s, "%d", level);
-  tv.print_str(48, 40, "LEVEL ");
-  tv.print_str(80, 40, s);
-  tv.delay(240);
+  tv.print(48, 40, "LEVEL ");
+  tv.print(80, 40, s);
+  tv.delay_frame(240);
   tv.fill(0);
-  tv.select_font(_3X5);
+  tv.select_font(font4x6);
 
   initVars();
   drawRemainingLives();
@@ -732,8 +697,8 @@ void drawScoreLine() {
   }
   sprintf(s, "%d", score);
   byte len = strlen(s);
-  byte xx = W  - (len*_3X5);
-  tv.print_str(xx, FOOTER_Y, s);
+  byte xx = W - (len*5);
+  tv.print(xx, FOOTER_Y, s);
 }
 
 void drawCannon(byte x, byte y, byte color) {
@@ -918,9 +883,11 @@ void drawLaser() {
       for(r=0;r<=bottomRow;r++) {
         for(c=leftCol;c<=rightCol;c++) {
           if (invaders[r] & (1<<(15-c))) {
+
             // (x,y) is upper left corner of invader
             x = invaderXLeft + ((c-leftCol) * (INVADER_WIDTH+COL_SPACING));
             y = invaderY + (r * (INVADER_HEIGHT+ROW_SPACING));
+
             if ((laserX >= x) && (laserX <= x+INVADER_WIDTH) && (laserY >= y) && (laserY <= y+INVADER_HEIGHT)) {
               // We hit an invader!
               invaders[r] &= ~(1<<(15-c));
@@ -998,11 +965,11 @@ void drawLaser() {
       // Check to see if we hit the mystery ship
       if ((laserY < 5) && (laserY >= 0) && (laserX >= mysteryShipX) && (laserX < mysteryShipX+MYSTERY_SHIP_WIDTH) && (eraseMysteryScoreTime == -1)) {
         playTone(1046, 20);
-        tv.delay(1);
+        tv.delay_frame(1);
         playTone(1318, 20);
-        tv.delay(1);
+        tv.delay_frame(1);
         playTone(1568, 20);
-        tv.delay(1);
+        tv.delay_frame(1);
         playTone(2093, 20);
 
         byte bitmap = BITMAP_BLANK + 8;
@@ -1171,7 +1138,7 @@ void destroyCannon() {
       tv.set_pixel(x, y, 0);
     }
   }
-  tv.delay(60);
+  tv.delay_frame(60);
   drawCannon(cannonX, CANNON_Y, 1);
 }
 

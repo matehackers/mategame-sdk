@@ -30,7 +30,7 @@ export ARDUINO_DIR = /usr/share/arduino/
 
 # These libs are mostly used in the TVout games, they should be placed
 # inside your arduino IDE 'libraries' folder
-export ARDUINO_LIBS = EEPROM Controllers TVout
+export ARDUINO_LIBS = EEPROM Controllers TVout TVoutfonts
 
 # Your board's name, find it in 'boards.txt' inside the arduino folder
 export BOARD_TAG = atmega328

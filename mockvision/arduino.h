@@ -11,13 +11,19 @@
 #define INPUT 0
 #define OUTPUT 1
 
+typedef bool boolean;
+
 void pinMode(int p, int v);
 void digitalWrite(int p, int v);
 int digitalRead(int p);
 int analogRead(int p);
 
-void randomSeed(int seed) { srand(seed); }
-int random(int n, int m) { return rand() % (m - n) + n; }
+long random(long);
+long random(long, long);
+void randomSeed(unsigned int);
+long map(long, long, long, long, long);
+
+long millis();
 
 extern SDL_Thread *_graphics_thread;
 extern bool _mockvision_running;

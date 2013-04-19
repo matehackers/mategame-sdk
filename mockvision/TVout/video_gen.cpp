@@ -23,25 +23,24 @@
  OTHER DEALINGS IN THE SOFTWARE.
 */
 
+// #include <avr/interrupt.h>
+// #include <avr/io.h>
+
 #include "video_gen.h"
 
 #include <SDL.h>
-// #include <SDL_draw.h>
 #include <SDL_thread.h>
 #include <beeper.h>
 
 #define WAIT_FOR_FRAMES 1000/30.0
 
-int renderLine;
-
-TVout_vid display;
 SDL_Surface *mock_screen;
 SDL_Thread *_graphics_thread;
 Beeper *_audio_beeper;
 
-void (*render_line)();
-void (*line_handler)();
-void (*vbi_hook)();
+extern bool _mockvision_running;
+
+TVout_vid display;
 
 int draw_loop(void *unused)
 {
@@ -70,8 +69,6 @@ int draw_loop(void *unused)
                 rect.h = SCREEN_H/display.vres;
 
                 SDL_FillRect(mock_screen, &rect, color);
-
-                // Draw_FillRect(mock_screen, x, y, SCREEN_W/(display.hres), SCREEN_H/display.vres, color);
             }
         }
 
@@ -103,26 +100,45 @@ TVout_vid::TVout_vid() {
     }
 }
 
+volatile long remainingToneVsyncs;
+
+void empty() {
+}
+
+int renderLine;
+void (*render_line)();			//remove me
+void (*line_handler)();			//remove me
+void (*hbi_hook)() = &empty;
+void (*vbi_hook)() = &empty;
+
+void render_setup(uint8_t mode, uint8_t x, uint8_t y, uint8_t *scrnptr) {
+	display.screen = scrnptr;
+	display.hres = x;
+	display.vres = y;
+	display.frames = 0;
+}
+
 void blank_line() {
-    // TODO
 }
 
 void active_line() {
-    // TODO
 }
 
 void vsync_line() {
-    // TODO
 }
 
-void wait_until(uint8_t time) {
-    // TODO
+
+void inline wait_until(uint8_t time) {
 }
 
 void render_line6c() {
-    // TODO
 }
 
 void render_line5c() {
-    // TODO
+}
+
+void render_line4c() {
+}
+
+void render_line3c() {
 }

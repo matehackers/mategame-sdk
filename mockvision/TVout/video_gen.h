@@ -32,44 +32,48 @@
 #define     SCREEN_H    600
 
 class TVout_vid {
-
 public:
 	TVout_vid();
 
 	volatile int scanLine;
-	int start_render;
-	int stop_render;
-	int lines_frame;
+	volatile unsigned long frames;
+	unsigned char start_render;
+	int lines_frame;	  	//remove me
 	uint8_t vres;
 	uint8_t hres;
-	uint8_t output_delay;
-	char vscale_const;
-	char vscale;
-	char vsync_end;
+	uint8_t output_delay; 	//remove me
+	char vscale_const;		//combine me with status switch
+	char vscale;			//combine me too.
+	char vsync_end;			//remove me
 	uint8_t * screen;
 };
+
+extern TVout_vid display;
 
 struct SDL_Surface;
 struct SDL_Thread;
 struct Beeper;
 
-extern TVout_vid display;
 extern bool _mockvision_running;
 extern SDL_Thread *_graphics_thread;
 
-//tone generation properties
-extern volatile long remainingToneVsyncs;
-
-extern void (*render_line)();
-extern void (*line_handler)();
+extern void (*hbi_hook)();
 extern void (*vbi_hook)();
+
+void render_setup(uint8_t mode, uint8_t x, uint8_t y, uint8_t *scrnptr);
 
 void blank_line();
 void active_line();
 void vsync_line();
+void empty();
+
+//tone generation properties
+extern volatile long remainingToneVsyncs;
 
 // 6cycles functions
 void render_line6c();
 void render_line5c();
-void wait_until(uint8_t time);
+void render_line4c();
+void render_line3c();
+void inline wait_until(uint8_t time);
 #endif

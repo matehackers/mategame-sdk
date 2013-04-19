@@ -17,6 +17,8 @@ bool _mockvision_running = true;
 SDL_Thread *_input_thread;
 SDL_Thread *_audio_thread;
 
+long _millis = 0;
+
 /* Some functions to simulate Arduino inputs, I plan on having
    a GUI for visualizing and adjusting those */
 void pinMode(int p, int v)
@@ -36,6 +38,41 @@ int digitalRead(int p)
 int analogRead(int p)
 {
     return _analogPins[p];
+}
+
+/* Straight from the Arduino code */
+void randomSeed(unsigned int seed)
+{
+  if (seed != 0) {
+    srandom(seed);
+  }
+}
+
+long random(long howbig)
+{
+  if (howbig == 0) {
+    return 0;
+  }
+  return random() % howbig;
+}
+
+long random(long howsmall, long howbig)
+{
+  if (howsmall >= howbig) {
+    return howsmall;
+  }
+  long diff = howbig - howsmall;
+  return random(diff) + howsmall;
+}
+
+long map(long x, long in_min, long in_max, long out_min, long out_max)
+{
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+long millis()
+{
+    return _millis;
 }
 
 char* strcpy_P(char* c, char* d)
@@ -148,6 +185,7 @@ int main()
         if ( (SDL_GetTicks() - cur_ticks) > 1)
         {
             cur_ticks = SDL_GetTicks();
+            _millis = cur_ticks;
             loop();
         }
     }

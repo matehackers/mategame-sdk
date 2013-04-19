@@ -23,11 +23,13 @@
  OTHER DEALINGS IN THE SOFTWARE.
 */
 
-/*
- This library provides a simple method for outputting data to a tv
- from a frame buffer stored in sram.  This implementation is done
- completly by interupt and will return give as much cpu time to the
- application as possible.
+/* A note about how Color is defined for this version of TVout
+ *
+ * Where ever choosing a color is mentioned the following are true:
+ *     BLACK    =0
+ *    WHITE    =1
+ *    INVERT    =2
+ *    All others will be ignored.
 */
 
 #include <avr/pgmspace.h>
@@ -37,624 +39,708 @@
 #include <SDL/SDL.h>
 #include <beeper.h>
 
-PROGMEM const unsigned char ascii3x5[] ={
-#include "ascii3x5.h"
-};
-
-PROGMEM const unsigned char ascii5x7[] = {
-#include "ascii5x7.h"
-};
-
-PROGMEM const unsigned char ascii8x8[] = {
-#include "ascii8x8.h"
-};
-
-PROGMEM const unsigned char bitmap[] = {
-#include "bitmap.h"
-};
-
-/* call this to start video output with the default resolution.
- * returns 4 if not enough memory.
+/* Call this to start video output with the default resolution.
+ * 
+ * Arguments:
+ *    mode:
+ *        The video standard to follow:
+ *        PAL        =1    =_PAL
+ *        NTSC    =0    =_NTSC
+ *
+ * Returns:
+ *    0 if no error.
+ *    4 if there is not enough memory.
  */
 char TVout::begin(uint8_t mode) {
+    return begin(mode,128,96);
+} // end of begin
 
-    display.vscale = 1;
-    display.vscale_const = 1;
-    display.vres = 96;
-    display.hres = 128/8;
-    render_line = &render_line6c;
-
-    display.screen = (unsigned char*)malloc(display.hres * display.vres * sizeof(unsigned char));
-    if (display.screen == NULL)
-        return 4;
-
-    // Clear screen
-    memset(display.screen, 0, display.hres * display.vres * sizeof(unsigned char));
-
-    return 0;
-}
 
 /* call this to start video output with a specified resolution.
- * mode selects NTSC or PAL
- * x is the horizontal resolution MUST BE DIVISABLE BY 8 (max 248)
- * y is the vertical resolution (max 255)
+ *
+ * Arguments:
+ *    mode:
+ *        The video standard to follow:
+ *        PAL        =1    =_PAL
+ *        NTSC    =0    =_NTSC
+ *    x:
+ *        Horizonal resolution must be divisable by 8.
+ *    y:
+ *        Vertical resolution.
+ *
+ *    Returns:
+ *        0 if no error.
+ *        1 if x is not divisable by 8.
+ *        2 if y is to large (NTSC only cannot fill PAL vertical resolution by 8bit limit)
+ *        4 if there is not enough memory for the frame buffer.
  */
 char TVout::begin(uint8_t mode, uint8_t x, uint8_t y) {
+    // check if x is divisable by 8
+    if ( !(x & 0xF8))
+        return 1;
+    x = x/8;
 
-    display.hres = x/8;
-    display.vres = y;
-
-    display.screen = (unsigned char*)malloc(display.hres * display.vres * sizeof(unsigned char));
-
-    if (display.screen == NULL)
+    screen = (unsigned char*)malloc(x * y * sizeof(unsigned char));
+    if (screen == NULL)
         return 4;
 
-    if ( display.hres >= 13 && display.hres <= 16 )
-        render_line = &render_line6c;
-    else if ( display.hres >= 17 && display.hres <= 19)
-        render_line = &render_line5c;
-    else
-        return 5;
+    cursor_x = 0;
+    cursor_y = 0;
 
-    // Clear screen
-    memset(display.screen, 0, display.hres * display.vres * sizeof(unsigned char));
-
+    render_setup(mode,x,y,screen);
+    clear_screen();
     return 0;
+} // end of begin
+
+/* Stop video render and free the used memory.
+ */
+ void TVout::end() {
+    free(screen);
 }
 
-/* pauses rendering but keeps outputting a HSYNC this gives all CPU time to
- * user code
-*/
-void TVout::pause() {
-    // TODO
-}
-
-/* Resume rendering the screen
-*/
-void TVout::resume() {
-    // TODO
-}
-
-/* Clears the screen
+/* Fill the screen with some color.
+ *
+ * Arguments:
+ *    color:
+ *        The color to fill the screen with.
+ *        (see color note at the top of this file)
 */
 void TVout::fill(uint8_t color) {
     switch(color) {
-        case 0:
+        case BLACK:
+            cursor_x = 0;
+            cursor_y = 0;
             for (int i = 0; i < (display.hres)*display.vres; i++)
                 display.screen[i] = 0;
             break;
-        case 1:
+        case WHITE:
+            cursor_x = 0;
+            cursor_y = 0;
             for (int i = 0; i < (display.hres)*display.vres; i++)
                 display.screen[i] = 0xFF;
             break;
-        case 2:
+        case INVERT:
             for (int i = 0; i < display.hres*display.vres; i++)
                 display.screen[i] = ~display.screen[i];
             break;
     }
-}
+} // end of fill
 
 /* Gets the Horizontal resolution of the screen
+ *
+ * Returns: 
+ *    The horizonal resolution.
 */
 unsigned char TVout::hres() {
     return display.hres*8;
-}
+} // end of hres
 
 /* Gets the Vertical resolution of the screen
+ *
+ * Returns:
+ *    The vertical resolution
 */
 unsigned char TVout::vres() {
     return display.vres;
-}
+} // end of vres
 
 /* Return the number of characters that will fit on a line
+ *
+ * Returns:
+ *    The number of characters that will fit on a text line starting from x=0.
+ *    Will return -1 for dynamic width fonts as this cannot be determined.
 */
 char TVout::char_line() {
-    return ((display.hres*8)/font);
-}
+    return ((display.hres*8)/pgm_read_byte(font));
+} // end of char_line
 
-/* Delay for x frames
- * for NTSC 1 second = 60 frames
- * for PAL 1 second = 50 frames
- */
+/* delay for x ms
+ * The resolution is 16ms for NTSC and 20ms for PAL
+ *
+ * Arguments:
+ *    x:
+ *        The number of ms this function should consume.
+*/
 void TVout::delay(unsigned int x) {
-    SDL_Delay(x*10);
+    // unsigned long time = millis() + x;
+    // while(millis() < time);
+    SDL_Delay(x);
+} // end of delay
+
+
+/* Delay for x frames, exits at the end of the last display line.
+ * delay_frame(1) is useful prior to drawing so there is little/no flicker.
+ *
+ * Arguments:
+ *    x:
+ *        The number of frames to delay for.
+ */
+void TVout::delay_frame(unsigned int x) {
+    // TODO
+} // end of delay_frame
+
+
+/* Get the time in ms since begin was called.
+ * The resolution is 16ms for NTSC and 20ms for PAL
+ *
+ * Returns:
+ *    The time in ms since video generation has started.
+*/
+unsigned long TVout::millis() {
+    return 0;
+} // end of millis
+
+
+/* force the number of times to display each line.
+ *
+ * Arguments:
+ *    sfactor:
+ *        The scale number of times to repeate each line.
+ */
+void TVout::force_vscale(char sfactor) {
+    delay_frame(1);
+    display.vscale_const = sfactor - 1;
+    display.vscale = sfactor - 1;
 }
 
-/* plot one point 
- * at x,y with color 1=white 0=black 2=invert
+/* force the output start time of a scanline in micro seconds.
+ *
+ * Arguments:
+ *    time:
+ *        The new output start time in micro seconds.
+ */
+void TVout::force_outstart(uint8_t time) {
+    delay_frame(1);
+    display.output_delay = ((time * _CYCLES_PER_US) - 1);
+}
+
+
+/* force the start line for active video
+ *
+ * Arguments:
+ *    line:
+ *        The new active video output start line
+ */
+void TVout::force_linestart(uint8_t line) {
+    delay_frame(1);
+    display.start_render = line;
+}
+
+/* Set the color of a pixel
+ *
+ * Arguments:
+ *    x:
+ *        The x coordinate of the pixel.
+ *    y:
+ *        The y coordinate of the pixel.
+ *    c:
+ *        The color of the pixel
+ *        (see color note at the top of this file)
  */
 void TVout::set_pixel(uint8_t x, uint8_t y, char c) {
     if (x >= display.hres*8 || y >= display.vres)
         return;
     sp(x,y,c);
-}
+} // end of set_pixel
 
-/* Returns the value of pixel (x,y)
- * 0 if pixel is black
- * !0 if pixel is white
+
+/* get the color of the pixel at x,y
+ *
+ * Arguments:
+ *    x:
+ *        The x coordinate of the pixel.
+ *    y:
+ *        The y coordinate of the pixel.
+ *
+ * Returns:
+ *    The color of the pixel.
+ *    (see color note at the top of this file)
+ *
  * Thank you gijs on the arduino.cc forum for the non obviouse fix.
 */
 unsigned char TVout::get_pixel(uint8_t x, uint8_t y) {
     if (x >= display.hres*8 || y >= display.vres)
         return 0;
-    return ((display.screen[(x/8) +(y*display.hres)] >> ((~x) & 7)) &0x01);
-}
+    if (display.screen[x/8+y*display.hres] & (0x80 >>(x&7)))
+        return 1;
+    return 0;
+} // end of get_pixel
 
-/* draw a line
- * x1,y1 to x2,y2
- * with color 1 = white, 0=black, 2=invert
+/* Draw a line from one point to another
+ *
+ * Arguments:
+ *    x0:
+ *        The x coordinate of point 0.
+ *    y0:
+ *        The y coordinate of point 0.
+ *    x1:
+ *        The x coordinate of point 1.
+ *    y1:
+ *        The y coordinate of point 1.
+ *    c:
+ *        The color of the line.
+ *        (see color note at the top of this file)
  */
 void TVout::draw_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, char c) {
+
     if (x0 > display.hres*8 || y0 > display.vres || x1 > display.hres*8 || y1 > display.vres)
         return;
-
-    int e;
-    signed int dx,dy,j, temp;
-    signed char s1,s2, xchange;
-    signed int x,y;
-
-    x = x0;
-    y = y0;
-
-    //take absolute value
-    if (x1 < x0) {
-        dx = x0 - x1;
-        s1 = -1;
-    }
-    else if (x1 == x0) {
-        dx = 0;
-        s1 = 0;
-    }
+    if (x0 == x1)
+        draw_column(x0,y0,y1,c);
+    else if (y0 == y1)
+        draw_row(y0,x0,x1,c);
     else {
-        dx = x1 - x0;
-        s1 = 1;
-    }
+        int e;
+        signed int dx,dy,j, temp;
+        signed char s1,s2, xchange;
+        signed int x,y;
 
-    if (y1 < y0) {
-        dy = y0 - y1;
-        s2 = -1;
+        x = x0;
+        y = y0;
+
+        //take absolute value
+        if (x1 < x0) {
+            dx = x0 - x1;
+            s1 = -1;
+        }
+        else if (x1 == x0) {
+            dx = 0;
+            s1 = 0;
+        }
+        else {
+            dx = x1 - x0;
+            s1 = 1;
+        }
+
+        if (y1 < y0) {
+            dy = y0 - y1;
+            s2 = -1;
+        }
+        else if (y1 == y0) {
+            dy = 0;
+            s2 = 0;
+        }
+        else {
+            dy = y1 - y0;
+            s2 = 1;
+        }
+
+        xchange = 0;
+
+        if (dy>dx) {
+            temp = dx;
+            dx = dy;
+            dy = temp;
+            xchange = 1;
+        } 
+
+        e = ((int)dy<<1) - dx;
+
+        for (j=0; j<=dx; j++) {
+            sp(x,y,c);
+
+            if (e>=0) {
+                if (xchange==1) x = x + s1;
+                else y = y + s2;
+                e = e - ((int)dx<<1);
+            }
+            if (xchange==1)
+                y = y + s2;
+            else
+                x = x + s1;
+            e = e + ((int)dy<<1);
+        }
     }
-    else if (y1 == y0) {
-        dy = 0;
-        s2 = 0;
-    }
+} // end of draw_line
+
+
+/* Fill a row from one point to another
+ *
+ * Argument:
+ *    line:
+ *        The row that fill will be performed on.
+ *    x0:
+ *        edge 0 of the fill.
+ *    x1:
+ *        edge 1 of the fill.
+ *    c:
+ *        the color of the fill.
+ *        (see color note at the top of this file)
+*/
+void TVout::draw_row(uint8_t line, uint16_t x0, uint16_t x1, uint8_t c) {
+    uint8_t lbit, rbit;
+
+    if (x0 == x1)
+        set_pixel(x0,line,c);
     else {
-        dy = y1 - y0;
-        s2 = 1;
-    }
-
-    xchange = 0;
-
-    if (dy>dx) {
-        temp = dx;
-        dx = dy;
-        dy = temp;
-        xchange = 1;
-    }
-
-    e = ((int)dy<<1) - dx;
-
-    for (j=0; j<=dx; j++) {
-        sp(x,y,c);
-
-        if (e>=0) {
-            if (xchange==1) x = x + s1;
-            else y = y + s2;
-            e = e - ((int)dx<<1);
+        if (x0 > x1) {
+            lbit = x0;
+            x0 = x1;
+            x1 = lbit;
         }
-
-        if (xchange==1)
-            y = y + s2;
-        else
-            x = x + s1;
-
-        e = e + ((int)dy<<1);
-    }
-}
-
-/* draw a box
- * x1,y1 to x2,y2
- * with color 1 = white, 0=black, 2=invert
- * with fill 0 = black fill, 1 = white fill, 2 = invert fill, 3 = no fill
- * with radius for rounded box
- * safe draw or not 1 = safe
- * Added by Andy Crook 2010
- */
-void TVout::draw_box(unsigned char x0, unsigned char y0,
-               unsigned char x1, unsigned char y1, char c, char d, char e, char f)
-{
-    /* x0,y0 = start position from top left    x1,y1 = width and height
-    *  c is box line colour, d is fill colour, e is radius for rounded rectangles (0 radius = straight box)
-    *  if the radius is bigger than x0 or y0 then dont render, if the position + length + radius is bigger than the resolution then dont render
-    */
-    if (f == 0 ) { // if safe sp is off
-        if (x0 >= display.hres*8 || y0 >= display.vres || x0 + x1 + e >= display.hres*8 || y0 + y1 + e >= display.vres)
-            return;
-    }
-
-    unsigned char x,y;
-
-    if (e == 0) { // ordinary box
-        if (d < 3) { // fill the box with the appropriate colour if the fill is 0, 1 or 2. if 3 or higher, no fill
-            for (y = y0+1; y < y0+y1-1; y++) {
-                for (x = x0+1; x < x0+x1; x++)
-                    sp_safe(x,y,d,f);
-            }
+        lbit = 0xff >> (x0&7);
+        x0 = x0/8 + display.hres*line;
+        rbit = ~(0xff >> (x1&7));
+        x1 = x1/8 + display.hres*line;
+        if (x0 == x1) {
+            lbit = lbit & rbit;
+            rbit = 0;
         }
-        // Now draw the box
-        for (y = y0; y < y0+y1; y++) {
-            sp_safe(x0,y,c,f);   // left hand line
-            sp_safe(x0+x1,y,c,f); // right hand line
+        if (c == WHITE) {
+            screen[x0++] |= lbit;
+            while (x0 < x1)
+                screen[x0++] = 0xff;
+            screen[x0] |= rbit;
         }
-        for (x = x0+1; x < x0 + x1; x++) {
-            sp_safe(x,y0,c,f); // top line
-            sp_safe(x,y0+y1-1,c,f); // bottom line
+        else if (c == BLACK) {
+            screen[x0++] &= ~lbit;
+            while (x0 < x1)
+                screen[x0++] = 0;
+            screen[x0] &= ~rbit;
+        }
+        else if (c == INVERT) {
+            screen[x0++] ^= lbit;
+            while (x0 < x1)
+                screen[x0++] ^= 0xff;
+            screen[x0] ^= rbit;
         }
     }
-    if (e>0) {   // rounded rectangle! Split a circle into the 4 corners and draw a box
-    // subtract the radius of the corners from the straight box we want to draw
+} // end of draw_row
 
-        if (e+e > y1) // we cant draw a rounded box with a total radius bigger than the dimensions
-            return;
-        if (e+e > x1)
-            return;
+/* Fill a column from one point to another
+ *
+ * Argument:
+ *    row:
+ *        The row that fill will be performed on.
+ *    y0:
+ *        edge 0 of the fill.
+ *    y1:
+ *        edge 1 of the fill.
+ *    c:
+ *        the color of the fill.
+ *        (see color note at the top of this file)
+*/
+void TVout::draw_column(uint8_t row, uint16_t y0, uint16_t y1, uint8_t c) {
 
-        x0=x0+e;
-        y0=y0+e;
-        y1=y1-e-e;
-        x1=x1-e-e;
-        // draw the box
-
-        if (d < 3) {// fill the box with the appropriate colour if the fill is 0, 1 or 2. if 3 or higher, no fill
-            for (y = y0-e; y < y0+y1+e; y++) {
-                for (x = x0; x < x0+x1+1; x++)
-                    sp_safe(x,y,d,f);
-            }
-            for (y = y0; y < y0+y1+1; y++) {
-                for (x = x0-e; x < x0+1; x++)
-                    sp_safe(x,y,d,f);
-                for (x = x0+x1; x < x0+x1+e+1; x++)
-                    sp_safe(x,y,d,f);
-            }
+    unsigned char bit;
+    int byte;
+    
+    if (y0 == y1)
+        set_pixel(row,y0,c);
+    else {
+        if (y1 < y0) {
+            bit = y0;
+            y0 = y1;
+            y1 = bit;
         }
-
-        for (y = y0; y < y0+y1; y++) {
-            sp_safe(x0-e,y+1,c,f);        // First do the left hand line
-            sp_safe(x0+x1+e,y+1,c,f);    // Now do the right hand line
-        }
-
-        for (x = x0+1; x < x0 + x1+1; x++) {
-            sp_safe(x,y0-e,c,f);        // First do the top line
-            sp_safe(x,y0+y1+e,c,f);        // Now do the bottom line
-        }
-
-        int radius = e;
-        int ff = 1 - radius;
-        int dx = 1;
-        int dy = -2 * radius;
-        int x = 0;
-        int y = radius;
-        int sty1 = 0;
-
-        // draw  quarter circles at each corner of the box
-        ff = 1 - radius;
-        dx = 1;
-        dy = -2 * radius;
-        x = 0;
-        y = radius;
-
-        if (d<3) {
-            // if filled, use endpoints to draw lines to center x
-            for (sty1=0; sty1<radius; sty1++) {
-                sp_safe(x0,y0+sty1+y1,d,f);
-                sp_safe(x0,y0-sty1,d,f);
-                sp_safe(x0+sty1+x1,y0,d,f);
-                sp_safe(x0-sty1,y0,d,f);
+        bit = 0x80 >> (row&7);
+        byte = row/8 + y0*display.hres;
+        if (c == WHITE) {
+            while ( y0 <= y1) {
+                screen[byte] |= bit;
+                byte += display.hres;
+                y0++;
             }
         }
-        sp_safe(x0, y0 + radius+y1,c,f);
-        sp_safe(x0, y0 - radius,c,f);
-        sp_safe(x0 + radius+x1, y0,c,f);
-        sp_safe(x0 - radius, y0,c,f);
-        while(x < y) {
-            if(ff >= 0) {
-                y--;
-                dy += 2;
-                ff += dy;
+        else if (c == BLACK) {
+            while ( y0 <= y1) {
+                screen[byte] &= ~bit;
+                byte += display.hres;
+                y0++;
             }
-            x++;
-            dx += 2;
-            ff += dx;
-            if (d<3) {
-                // if filled, use endpoints to draw lines to center x
-                for (sty1=0; sty1<y; sty1++) {
-                    sp_safe(x0+x+x1,y0+sty1+y1,d,f);
-                    sp_safe(x0-x,y0+sty1+y1,d,f);
-                    sp_safe(x0+x+x1,y0-sty1,d,f);
-                    sp_safe(x0-x,y0-sty1,d,f);
-                    sp_safe(x0+sty1+x1,y0+x+y1,d,f);
-                    sp_safe(x0-sty1,y0+x+y1,d,f);
-                    sp_safe(x0+sty1+x1,y0-x,d,f);
-                    sp_safe(x0-sty1,y0-x,d,f);
-                }
-            }
-            sp_safe(x0 + x+x1, y0 + y+y1,c,f);
-            sp_safe(x0 - x, y0 + y+y1,c,f);
-            sp_safe(x0 + x+x1, y0 - y,c,f);
-            sp_safe(x0 - x, y0 - y,c,f);
-            sp_safe(x0 + y+x1, y0 + x+y1,c,f);
-            sp_safe(x0 - y, y0 + x+y1,c,f);
-            sp_safe(x0 + y+x1, y0 - x,c,f);
-            sp_safe(x0 - y, y0 - x,c,f);
         }
-        if (d<3) { // redraw circle
-            // draw circle
-            ff = 1 - radius;
-            dx = 1;
-            dy = -2 * radius;
-            x = 0;
-            y = radius;
-
-            sp_safe(x0, y0 + radius+y1,c,f);
-            sp_safe(x0, y0 - radius,c,f);
-            sp_safe(x0 + radius+x1, y0,c,f);
-            sp_safe(x0 - radius, y0,c,f);
-
-            while(x < y) {
-
-                if(ff >= 0) {
-                    y--;
-                    dy += 2;
-                    ff += dy;
-                }
-                x++;
-                dx += 2;
-                ff += dx;
-                sp_safe(x0 + x+x1, y0 + y+y1,c,f);
-                sp_safe(x0 - x, y0 + y+y1,c,f);
-                sp_safe(x0 + x+x1, y0 - y,c,f);
-                sp_safe(x0 - x, y0 - y,c,f);
-                sp_safe(x0 + y+x1, y0 + x+y1,c,f);
-                sp_safe(x0 - y, y0 + x+y1,c,f);
-                sp_safe(x0 + y+x1, y0 - x,c,f);
-                sp_safe(x0 - y, y0 - x,c,f);
+        else if (c == INVERT) {
+            while ( y0 <= y1) {
+                screen[byte] ^= bit;
+                byte += display.hres;
+                y0++;
             }
         }
     }
 }
 
-/* draw a circle
- * x0,y0 around radius
- * with color 1 = white, 0=black, 2=invert
- * with fill 0 = black fill, 1 = white fill, 2 = invert fill, 3 = no fill
- * safe draw or not 1 = safe
- * Added by Andy Crook 2010
- */
-void TVout::draw_circle(unsigned char x0, unsigned char y0,
-                unsigned char radius, char c, char d, char h)
-{
-    if (h == 0) {
-        if (x0+radius >= display.hres*8 || y0+radius >= display.vres || radius >= x0 || radius >= y0)
-            return;
+
+/* draw a rectangle at x,y with a specified width and height
+ * 
+ * Arguments:
+ *    x0:
+ *        The x coordinate of upper left corner of the rectangle.
+ *    y0:
+ *        The y coordinate of upper left corner of the rectangle.
+ *    w:
+ *        The widht of the rectangle.
+ *    h:
+ *        The height of the rectangle.
+ *    c:
+ *        The color of the rectangle.
+ *        (see color note at the top of this file)
+ *    fc:
+ *        The fill color of the rectangle.
+ *        (see color note at the top of this file)
+ *        default =-1 (no fill)
+*/
+void TVout::draw_rect(uint8_t x0, uint8_t y0, uint8_t w, uint8_t h, char c, char fc) {
+    if (fc != -1) {
+        for (unsigned char i = y0; i < y0+h; i++)
+            draw_row(i,x0,x0+w,fc);
     }
+    draw_line(x0,y0,x0+w,y0,c);
+    draw_line(x0,y0,x0,y0+h,c);
+    draw_line(x0+w,y0,x0+w,y0+h,c);
+    draw_line(x0,y0+h,x0+w,y0+h,c);
+} // end of draw_rect
+
+
+/* draw a circle given a coordinate x,y and radius both filled and non filled.
+ *
+ * Arguments:
+ *     x0:
+ *        The x coordinate of the center of the circle.
+ *    y0:
+ *        The y coordinate of the center of the circle.
+ *    radius:
+ *        The radius of the circle.
+ *    c:
+ *        The color of the circle.
+ *        (see color note at the top of this file)
+ *    fc:
+ *        The color to fill the circle.
+ *        (see color note at the top of this file)
+ *        defualt  =-1 (do not fill)
+ */
+void TVout::draw_circle(uint8_t x0, uint8_t y0, uint8_t radius, char c, char fc) {
     int f = 1 - radius;
-    int dx = 1;
-    int dy = -2 * radius;
+    int ddF_x = 1;
+    int    ddF_y = -2 * radius;
     int x = 0;
     int y = radius;
-    int sty1 = 0;
+    uint8_t pyy = y,pyx = x;
 
-    // draw circle
-    f = 1 - radius;
-    dx = 1;
-    dy = -2 * radius;
-    x = 0;
-    y = radius;
+    //there is a fill color
+    if (fc != -1)
+        draw_row(y0,x0-radius,x0+radius,fc);
 
-    if (d<3) { // if filled, use endpoints to draw lines to center x
-        for (sty1=0; sty1<radius; sty1++) {
-            sp_safe(x0,y0+sty1,d,h);
-            sp_safe(x0,y0-sty1,d,h);
-            sp_safe(x0+sty1,y0,d,h);
-            sp_safe(x0-sty1,y0,d,h);
-        }
-    }
-    sp_safe(x0, y0 + radius,c,h);
-    sp_safe(x0, y0 - radius,c,h);
-    sp_safe(x0 + radius, y0,c,h);
-    sp_safe(x0 - radius, y0,c,h);
+    sp(x0, y0 + radius,c);
+    sp(x0, y0 - radius,c);
+    sp(x0 + radius, y0,c);
+    sp(x0 - radius, y0,c);
+
     while(x < y) {
         if(f >= 0) {
             y--;
-            dy += 2;
-            f += dy;
+            ddF_y += 2;
+            f += ddF_y;
         }
         x++;
-        dx += 2;
-        f += dx;
-        if (d<3) {
-            // if filled, use endpoints to draw lines to center x
-            for (sty1=0; sty1<y; sty1++) {
-                sp_safe(x0+x,y0+sty1,d,h);
-                sp_safe(x0-x,y0+sty1,d,h);
-                sp_safe(x0+x,y0-sty1,d,h);
-                sp_safe(x0-x,y0-sty1,d,h);
-                sp_safe(x0+sty1,y0+x,d,h);
-                sp_safe(x0-sty1,y0+x,d,h);
-                sp_safe(x0+sty1,y0-x,d,h);
-                sp_safe(x0-sty1,y0-x,d,h);
+        ddF_x += 2;
+        f += ddF_x;
+
+        //there is a fill color
+        if (fc != -1) {
+            //prevent double draws on the same rows
+            if (pyy != y) {
+                draw_row(y0+y,x0-x,x0+x,fc);
+                draw_row(y0-y,x0-x,x0+x,fc);
             }
-        }
-        sp_safe(x0 + x, y0 + y,c,h);
-        sp_safe(x0 - x, y0 + y,c,h);
-        sp_safe(x0 + x, y0 - y,c,h);
-        sp_safe(x0 - x, y0 - y,c,h);
-        sp_safe(x0 + y, y0 + x,c,h);
-        sp_safe(x0 - y, y0 + x,c,h);
-        sp_safe(x0 + y, y0 - x,c,h);
-        sp_safe(x0 - y, y0 - x,c,h);
-    }
-    if (d<3) {  // redraw circle
-
-    // draw circle
-        f = 1 - radius;
-        dx = 1;
-        dy = -2 * radius;
-        x = 0;
-        y = radius;
-
-        sp_safe(x0, y0 + radius,c,h);
-        sp_safe(x0, y0 - radius,c,h);
-        sp_safe(x0 + radius, y0,c,h);
-        sp_safe(x0 - radius, y0,c,h);
-
-        while(x < y) {
-            if(f >= 0) {
-                y--;
-                dy += 2;
-                f += dy;
+            if (pyx != x && x != y) {
+                draw_row(y0+x,x0-y,x0+y,fc);
+                draw_row(y0-x,x0-y,x0+y,fc);
             }
-            x++;
-            dx += 2;
-            f += dx;
-            sp_safe(x0 + x, y0 + y,c,h);
-            sp_safe(x0 - x, y0 + y,c,h);
-            sp_safe(x0 + x, y0 - y,c,h);
-            sp_safe(x0 - x, y0 - y,c,h);
-            sp_safe(x0 + y, y0 + x,c,h);
-            sp_safe(x0 - y, y0 + x,c,h);
-            sp_safe(x0 + y, y0 - x,c,h);
-            sp_safe(x0 - y, y0 - x,c,h);
+            pyy = y;
+            pyx = x;
         }
+        sp(x0 + x, y0 + y,c);
+        sp(x0 - x, y0 + y,c);
+        sp(x0 + x, y0 - y,c);
+        sp(x0 - x, y0 - y,c);
+        sp(x0 + y, y0 + x,c);
+        sp(x0 - y, y0 + x,c);
+        sp(x0 + y, y0 - x,c);
+        sp(x0 - y, y0 - x,c);
     }
-}
+} // end of draw_circle
 
 
-/* very simple bitmap placeing function, bitmap must be full screen and
- * called bitmap, this will be expanded.
- */
-void TVout::fs_bitmap() {
-    uint8_t byte;
-    for (int i = 0; i < display.hres*display.vres; i++) {
-        byte = pgm_read_byte((uint32_t)(bitmap) + i);
-        display.screen[i] = byte;
-        if (byte != display.screen[i]) {
-            print_str(0,80,"Copy Err");
-            while(1);
-        }
-    }
-}
-
-void TVout::select_font(uint8_t f) {
-    font = f;
-}
-
-/*
- * print an 8x8 char c at x,y
- * x must be a multiple of 8
- */
-void TVout::print_char(uint8_t x, uint8_t y, char c) {
-    uint8_t y_pos;
-    uint8_t j;
-
-    if (font == _3X5) {
-
-        // since this is not a complete font set fix the character
-        if (c < 39)
-            return;
-        else if (c > 'z')
-            c-=(26+39);
-        else if (c > '`')
-            c-=(97-65+39);
-        else
-            c-=39;
-
-        uint8_t mask;
-        if (x & 0x03) {
-            if (x == (x & 0xF8))
-                mask = 0x0F;
-            else
-                mask = 0xF0;
-            for (char i = 0; i < 5; i++) {
-                j = *(ascii3x5 + c*5 +i);
-                display.screen[x+(y*display.hres)] = (display.screen[x+(y*display.hres)] & mask) | (j & ~mask);
-                y++;
-            }
-        }
-        else {
-
-            for (char i=0;i<5;i++) {
-                y_pos = y + i;
-
-                j = *(ascii3x5 + c*5 + i);
-
-                sp(x,   y_pos, (j & 0x80)==0x80);
-                sp(x+1, y_pos, (j & 0x40)==0x40);
-                sp(x+2, y_pos, (j & 0x20)==0x20);
-                sp(x+3, y_pos, (j & 0x10)==0x10);
-            }
-        }
-    }
-    else if (font == _5X7) {
-        
-        // since there is nothing in the first 32 characters of the 5x7 font fix the offset c
-        if (c < ' ')
-            return;
-        else
-            c -= 32;
-        for (char i=0;i<7;i++) {
-            y_pos = y + i;
-
-            j = *(ascii5x7 + c*7 + i);
-
-            sp(x,   y_pos, (j & 0x80)==0x80);
-            sp(x+1, y_pos, (j & 0x40)==0x40);
-            sp(x+2, y_pos, (j & 0x20)==0x20);
-            sp(x+3, y_pos, (j & 0x10)==0x10);
-            sp(x+4, y_pos, (j & 0x08)==0x08);
-        }
-    }
-    else if (font == _8X8) {
-        if (x & 0x07) {
-            for (char i=0;i<8;i++) {
-                y_pos = y + i;
-
-                j = *(ascii8x8 + c*8 + i);
-
-                sp(x,   y_pos, (j & 0x80)==0x80);
-                sp(x+1, y_pos, (j & 0x40)==0x40);
-                sp(x+2, y_pos, (j & 0x20)==0x20);
-                sp(x+3, y_pos, (j & 0x10)==0x10);
-                sp(x+4, y_pos, (j & 0x08)==0x08);
-                sp(x+5, y_pos, (j & 0x04)==0x04);
-                sp(x+6, y_pos, (j & 0x02)==0x02);
-                sp(x+7, y_pos, (j & 0x01)==0x01);
-            }
-        }
-        else {
-            x = x/8;
-            for (char i = 0; i < 8; i++) {
-                j = pgm_read_byte(((uint32_t)(ascii8x8)) + c*8 + i);
-                display.screen[x+y*display.hres] = j;
-                y++;
-            }
-        }
-    }
-}
-
-/* print a null terminated string at x,y
+/* place a bitmap at x,y where the bitmap is defined as {width,height,imagedata....}
+ *
+ * Arguments:
+ *    x:
+ *        The x coordinate of the upper left corner.
+ *    y:
+ *        The y coordinate of the upper left corner.
+ *    bmp:
+ *        The bitmap data to print.
+ *    i:
+ *        The offset into the image data to start at.  This is mainly used for fonts.
+ *        default    =0
+ *    width:
+ *        Override the bitmap width. This is mainly used for fonts.
+ *        default =0 (do not override)
+ *    height:
+ *        Override the bitmap height. This is mainly used for fonts.
+ *        default    =0 (do not override)
 */
-void TVout::print_str(uint8_t x, uint8_t y, const char *str) {
-    // printf("TRACE: %s(x: %2d, y: %2d, str: \"%s\")\n", __FUNCTION__, x, y, str);
-    if (y >= display.vres)
-        return;
-    for (char i=0; str[i]!=0; i++) { 
-        if (x > (display.hres*8+font))
-            return;
-        print_char(x,y,str[i]);
-        x += font;
+void TVout::bitmap(uint8_t x, uint8_t y, const unsigned char * bmp,
+                   uint16_t i, uint8_t width, uint8_t lines) {
+
+    uint8_t temp, lshift, rshift, save, xtra;
+    uint16_t si = 0;
+
+    rshift = x&7;
+    lshift = 8-rshift;
+    if (width == 0) {
+        width = *(bmp + i);
+        i++;
     }
-}
+    if (lines == 0) {
+        lines = *(bmp + i);
+        i++;
+    }
+
+    if (width&7) {
+        xtra = width&7;
+        width = width/8;
+        width++;
+    }
+    else {
+        xtra = 8;
+        width = width/8;
+    }
+
+    for (uint8_t l = 0; l < lines; l++) {
+        si = (y + l)*display.hres + x/8;
+        if (width == 1)
+            temp = 0xff >> rshift + xtra;
+        else
+            temp = 0;
+        save = screen[si];
+        screen[si] &= ((0xff << lshift) | temp);
+        temp = *(bmp + i++);
+        screen[si++] |= temp >> rshift;
+        for ( uint16_t b = i + width-1; i < b; i++) {
+            save = screen[si];
+            screen[si] = temp << lshift;
+            temp = *(bmp + i);
+            screen[si++] |= temp >> rshift;
+        }
+        if (rshift + xtra < 8)
+            screen[si-1] |= (save & (0xff >> rshift + xtra));    //test me!!!
+        if (rshift + xtra - 8 > 0)
+            screen[si] &= (0xff >> rshift + xtra - 8);
+        screen[si] |= temp << lshift;
+    }
+} // end of bitmap
+
+/* shift the pixel buffer in any direction
+ * This function will shift the screen in a direction by any distance.
+ *
+ * Arguments:
+ *    distance:
+ *        The distance to shift the screen
+ *    direction:
+ *        The direction to shift the screen the direction and the integer values:
+ *        UP        =0
+ *        DOWN    =1
+ *        LEFT    =2
+ *        RIGHT    =3
+*/
+void TVout::shift(uint8_t distance, uint8_t direction) {
+    uint8_t * src;
+    uint8_t * dst;
+    uint8_t * end;
+    uint8_t shift;
+    uint8_t tmp;
+    switch(direction) {
+        case UP:
+            dst = display.screen;
+            src = display.screen + distance*display.hres;
+            end = display.screen + display.vres*display.hres;
+                
+            while (src <= end) {
+                *dst = *src;
+                *src = 0;
+                dst++;
+                src++;
+            }
+            break;
+        case DOWN:
+            dst = display.screen + display.vres*display.hres;
+            src = dst - distance*display.hres;
+            end = display.screen;
+                
+            while (src >= end) {
+                *dst = *src;
+                *src = 0;
+                dst--;
+                src--;
+            }
+            break;
+        case LEFT:
+            shift = distance & 7;
+            
+            for (uint8_t line = 0; line < display.vres; line++) {
+                dst = display.screen + display.hres*line;
+                src = dst + distance/8;
+                end = dst + display.hres-2;
+                while (src <= end) {
+                    tmp = 0;
+                    tmp = *src << shift;
+                    *src = 0;
+                    src++;
+                    tmp |= *src >> (8 - shift);
+                    *dst = tmp;
+                    dst++;
+                }
+                tmp = 0;
+                tmp = *src << shift;
+                *src = 0;
+                *dst = tmp;
+            }
+            break;
+        case RIGHT:
+            shift = distance & 7;
+            
+            for (uint8_t line = 0; line < display.vres; line++) {
+                dst = display.screen + display.hres-1 + display.hres*line;
+                src = dst - distance/8;
+                end = dst - display.hres+2;
+                while (src >= end) {
+                    tmp = 0;
+                    tmp = *src >> shift;
+                    *src = 0;
+                    src--;
+                    tmp |= *src << (8 - shift);
+                    *dst = tmp;
+                    dst--;
+                }
+                tmp = 0;
+                tmp = *src >> shift;
+                *src = 0;
+                *dst = tmp;
+            }
+            break;
+    }
+} // end of shift
+
+
+/* Inline version of set_pixel that does not perform a bounds check
+ * This function will be replaced by a macro.
+*/
+void inline sp(uint8_t x, uint8_t y, char c) {
+    if (c==1)
+        display.screen[(x/8) + (y*display.hres)] |= 0x80 >> (x&7);
+    else if (c==0)
+        display.screen[(x/8) + (y*display.hres)] &= ~0x80 >> (x&7);
+    else
+        display.screen[(x/8) + (y*display.hres)] ^= 0x80 >> (x&7);
+} // end of sp
+
+
+void TVout::set_vbi_hook(void (*func)()) {
+} // end of set_vbi_hook
+
+void TVout::set_hbi_hook(void (*func)()) {
+} // end of set_bhi_hook
 
 void TVout::tone(unsigned int frequency) {
   tone(frequency, 100);
@@ -664,47 +750,8 @@ void TVout::tone(unsigned int frequency, unsigned long duration_ms) {
     _audio_beeper->beep(frequency, duration_ms);
 }
 
+/* Stops tone generation
+ */
 void TVout::noTone() {
     // TODO
-}
-
-void TVout::set_vbi_hook(void (*func)()) {
-}
-
-
-void TVout::render_setup(uint8_t mode) {
-}
-
-/* Inline version of set_pixel that does not perform a bounds check
-*/
-void sp(uint8_t x, uint8_t y, char c) {
-    if (c==1)
-        display.screen[(x/8) + (y*display.hres)] |= 0x80 >> (x&7);
-    else if (c==0)
-        display.screen[(x/8) + (y*display.hres)] &= ~0x80 >> (x&7);
-    else
-        display.screen[(x/8) + (y*display.hres)] ^= 0x80 >> (x&7);
-}
-
-// Inline version of set_pixel that does perform a bounds check
-// Added by Andy Crook 2010
-void sp_safe(unsigned char x, unsigned char y, char c, char d) {
-    if (d==0) { // if d is zero then just do without any bounds check
-        if (c==1)
-            display.screen[(x/8) + (y*display.hres)] |= 0x80 >> (x&7);
-        else if (c==0)
-            display.screen[(x/8) + (y*display.hres)] &= ~0x80 >> (x&7);
-        else
-            display.screen[(x/8) + (y*display.hres)] ^= 0x80 >> (x&7);
-    }
-    else {  // d is 1, so check every pixel for boundary
-        if (x < display.hres*8 && y < display.vres) {  // if x is in bounds AND if y is in bounds then proceed with pixel write
-            if (c==1)
-                display.screen[(x/8) + (y*display.hres)] |= 0x80 >> (x&7);
-            else if (c==0)
-                display.screen[(x/8) + (y*display.hres)] &= ~0x80 >> (x&7);
-            else
-                display.screen[(x/8) + (y*display.hres)] ^= 0x80 >> (x&7);
-        }
-    }
-}
+} // end of noTone
