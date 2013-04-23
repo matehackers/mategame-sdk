@@ -7,6 +7,15 @@ The Mategame is an open software and open hardware kit based initially in [Hackv
 
 **Official Project Description**: <http://matehackers.org/doku.php?id=video_game>
 
+## Features of this SDK
+
+* Documentation on the API functions
+* Examples of how to program for the Mategame Hardware
+* A "simulator" for your games.
+  * It's actually a method of compiling Arduino sketches using the TVout, Controllers and other libraries as x86 applications
+* Makefiles and project files to help bootstrap your project
+* Hardware Peripherals specification and APIs
+
 ## Example source code
 
 There are many examples in the `examples` folder. Most of them are taken from [here](http://nootropicdesign.com/hackvision/games.html), but we'll be putting up some games and utility libraries.
@@ -53,6 +62,6 @@ Soon
 
 ### Ideas
 
-* Draw window showing, Arduino input/output ports
+* Draw a window showing Arduino input/output ports
 * Port to Processing and integrate into Arduino IDE
 * Integrate joysticks and nunchuck into the simulator
