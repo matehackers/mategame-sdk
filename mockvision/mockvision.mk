@@ -5,11 +5,11 @@ SDL_INCLUDES=-I/usr/include/SDL
 LIBS=-lSDL -lSDL_mixer
 FLAGS=-Wall -DF_CPU=$(F_CPU)
 
-F_CPU=16000000
+F_CPU=16000000L
 
 OBJECTS=build/beeper.o build/video_gen.o build/TVout.o build/Paddle.o build/ButtonController.o \
 		build/EEPROM.o build/TVoutPrint.o
-FONTS=font4x6.o font6x8.o font8x8.o font8x8ext.o
+FONTS=build/font4x6.o build/font6x8.o build/font8x8.o build/font8x8ext.o
 
 $(TARGET): build $(OBJECTS) $(ADDITIONAL_TARGETS) $(FONTS) build/mock_$(TARGET).cpp virtual_EEPROM
 	$(CXX) $(ADDITIONAL_TARGETS) $(OBJECTS) $(FONTS) build/mock_$(TARGET).cpp -o $@ $(INCLUDES) $(SDL_INCLUDES) $(LIBS) $(FLAGS)
@@ -28,7 +28,7 @@ virtual_EEPROM:
 	$(CXX) -c $< -o $@ $(FLAGS) $(INCLUDES)
 
 #Build fonts
-%.o: $(MOCKVISION_PATH)/TVoutfonts/%.cpp
+build/%.o: $(MOCKVISION_PATH)/TVoutfonts/%.cpp
 	$(CXX) -c $< -o $@ $(FLAGS) $(INCLUDES)
 
 # Build a joint .cpp file with the code and some of our definitions
