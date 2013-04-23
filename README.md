@@ -11,8 +11,8 @@ The Mategame is an open software and open hardware kit based initially in [Hackv
 
 * Documentation on the API functions
 * Examples of how to program for the Mategame Hardware
-* A "simulator" for your games.
-  * It's actually a method of compiling Arduino sketches using the TVout, Controllers and other libraries as x86 applications
+* Mockvision: a "simulator" for your games.
+    * It's actually a method of compiling Arduino sketches using the TVout, Controllers and other libraries as x86 applications
 * Makefiles and project files to help bootstrap your project
 * Hardware Peripherals specification and APIs
 
